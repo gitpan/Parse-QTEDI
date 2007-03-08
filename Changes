@@ -1,5 +1,8 @@
 Revision history for Perl extension Parse::QTEDI.
 
+0.00_03 20070308
+    - enum fix
+
 0.00_02 20070206
     - docu update
 
