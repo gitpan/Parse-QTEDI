@@ -11,7 +11,7 @@ require Exporter;
 use Parse::RecDescent ();
 use YAML ();
 
-$VERSION = '0.01_06';
+$VERSION = '0.01_07';
 $VERSION = eval $VERSION;  # see L<perlmodstyle>
 
 # Global flags 
@@ -337,6 +337,8 @@ function_header       :
       | keyword_typedef ) <commit> <reject>
   | function_header_block(s) 
     { $return = $item[1][0] !~ m/^\_\_/io ? [ '', @{$item[1]} ] : $item[1] } 
+    { if ($return->[1] =~ m/operator\(\)$/o) { 
+          $return->[1] .= splice @$return, 2, 1; }                         }
 function_header_next_token : 
   next_bracket_or_brace_or_semicolon 
     { $return = $item[1] } 
