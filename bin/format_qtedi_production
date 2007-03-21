@@ -296,6 +296,7 @@ parameters from function prototype line from QTEDI.
   RETURN    : [return type]
   PARAMETER : 
      - TYPE          : [param1 type]
+                       [NOTE: could be '...' in ansi]
        NAME          : [param1 name]
        DEFAULT_VALUE : [param1 default value]
      ...
@@ -308,18 +309,7 @@ sub __format_function {
     my $entry = shift;
     
     #print STDERR $entry->{name}, "\n";
-    # NOTE: operator()(int) and invoke(a = A(), b = B())
-    #       perform a pre-scan is better in this case than 
-    #       computing a complex OR-ed/recursive regex
-    my ( $fname_with_prefix, $fparams );
-    if ($entry->{name} =~ m/operator\(\)\(/o) {
-        ( $fname_with_prefix, $fparams ) = 
-          $entry->{name} =~ m/^((?>[^\(]+)\(\))\((.*)\)\s*$/io;
-    }
-    else {
-        ( $fname_with_prefix, $fparams ) = 
-          $entry->{name} =~ m/^((?>[^\(]+))\((.*)\)\s*$/io;
-    }
+    my $fname_with_prefix = $entry->{name};
     # filter out keywords from name
     my @fvalues = split /\s*\b\s*/, $fname_with_prefix;
     my $properties = [];
@@ -396,16 +386,30 @@ sub __format_function {
     }
     # format params
     my $parameters = [];
-    if ($fparams) {
-        my @params = split /\s*,\s*/, $fparams;
-        foreach my $p (@params) {
-            my @parameter = split /\s*=\s*/, $p;
-            my $pname_with_type = $parameter[0];
-            my $pdefault_value   = @parameter == 2 ? $parameter[1] :
-              '';
-            $pdefault_value =~ s/\s+$//o;
+    PARAMETER_MAIN_LOOP: 
+    foreach my $p (@{$entry->{parameter}}) {
+        next PARAMETER_MAIN_LOOP if 
+          $p->{subtype} eq 'simple' and $p->{name} eq '';
+        
+        my $pname_with_type = $p->{name};
+        my $psubtype        = $p->{subtype};
+        my $pdefault_value  = 
+          exists $p->{default} ? $p->{default} : '';
+        $pdefault_value =~ s/\s+$//o;
+        my ( $pname, $ptype );
+        
+        if ($psubtype eq 'fpointer') {
+            # FIXME: how to present the type of function pointer
+            $ptype = 'FUNCTION_POINTER';
+            # FIXME: recursive loop 
+            # $pname_with_type might be { name => '', parameter =>[] }
+            ( $pname = $pname_with_type ) =~ s/^\s*\*//gio;
+        }
+        else {
+            # simple && template
             # split param name [optional] and param type
-            my @pvalues = split /\s*\b\s*/, $pname_with_type;
+            my @pvalues = 
+              split /\s*(?<!::)\b(?!::)\s*/, $pname_with_type;
             my @pname = ();
             my @ptype = ();
             if (@pvalues == 1) {
@@ -433,9 +437,9 @@ sub __format_function {
             # left is type
             @ptype = @pvalues;
             # format param name
-            my $pname = @pname ? join('', @pname) : '';
+            $pname = @pname ? join('', @pname) : '';
             # format param type
-            my $ptype = '';
+            $ptype = '';
             if (@ptype) {
                 $ptype = shift @ptype;
                 for (my $i = 0; $i <= $#ptype; ) {
@@ -450,13 +454,14 @@ sub __format_function {
                 }
             }
             $ptype =~ s/\s+$//o;
-            # store param unit
-            my $p = { TYPE => $ptype };
-            $p->{NAME} = $pname if $pname;
-            $p->{DEFAULT_VALUE} = $pdefault_value if $pdefault_value;
-            push @$parameters, $p;
         }
+        # store param unit
+        my $p = { TYPE => $ptype };
+        $p->{NAME} = $pname if $pname;
+        $p->{DEFAULT_VALUE} = $pdefault_value if $pdefault_value;
+        push @$parameters, $p;
     }
+    
     # format function name
     my $fname = '';
     if ($is_operator_function) {
@@ -496,7 +501,7 @@ sub __format_function {
     $entry->{PROPERTY}  = $properties if @$properties;
     $entry->{PARAMETER} = $parameters if @$parameters;
     delete $entry->{name};
-    delete $entry->{fullname};
+    delete $entry->{parameter};
     return 1;
 }
 
@@ -675,10 +680,11 @@ sub __format_typedef {
         else {
             # subtype 1
             # simple
+            # NOTE: QValueList < KConfigSkeletonItem * >List
             ( $entry->{FROM}, $entry->{TO} ) = 
-              $entry->{value} =~ m/(.*)\s+([a-z_A-Z_0-9_\__\*_\&]+)$/io;
+              $entry->{value} =~ m/(.*)\s+([a-z_A-Z_0-9_\__\*_\&\>]+)$/io;
             # pointer/reference digit be moved into FROM
-            if ($entry->{TO} =~ s/^\s*((?:\*|\&))//io) {
+            if ($entry->{TO} =~ s/^\s*((?:\*|\&|\>))//io) {
                 $entry->{FROM} .= ' '. $1;
             }
         }
@@ -723,11 +729,11 @@ sub __format_extern {
     }
     elsif ($entry->{subtype} eq 'class') {
         if ($entry->{body}->{type} eq 'class') {
-            $entry->{body} = _format_class_body($entry->{body});
+            $entry->{body} = __format_class($entry->{body});
             $rc = 1;
         }
         elsif ($entry->{body}->{type} eq 'struct') {
-            $entry->{body} = _format_struct_body($entry->{body});
+            $entry->{body} = __format_struct($entry->{body});
             $rc = 1;
         }
     }
