@@ -65,9 +65,13 @@ An instance of Parse::RecDescent on demand
 1. Performance... Slower than before since function parameter parsing
 loop involved. Precompile could help a little bit; 
 
+2. 'spin' rule which has two subrules, both of them are optional. This
+will cause a similar case as waiting a spin lock; 
+
 =head1 BUG AND TODO
 
 1. Handle of __attribute__ pragma in expression;
+
 2. Handle of escaped token;
 
 =head1 OUTPUT SPEC
@@ -85,9 +89,9 @@ loop involved. Precompile could help a little bit;
   # a typedef line
   ---
      - type     : typedef
-     - value    : [ content of typedef, could be of enum/class/struct/union/simple type. ]
-                  [ will be a complete hashref entry in case of enum/class/struct/union, 
-                    refer to spec of those types below.                                  ]
+     - body     : [ content of typedef, could be of enum/class/struct/union/fpointer/simple type. ]
+                  [ will be a complete hashref entry in case of enum/class/struct/union/fpointer, 
+                    refer to spec of those types below.                                           ]
   
   # a standard C++ one-line comment
   # multiline style comment (/* */) is stripped by C++ preprocessor

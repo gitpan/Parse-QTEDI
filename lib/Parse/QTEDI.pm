@@ -11,7 +11,7 @@ require Exporter;
 use Parse::RecDescent ();
 use YAML ();
 
-$VERSION = '0.02_01';
+$VERSION = '0.02_02';
 $VERSION = eval $VERSION;  # see L<perlmodstyle>
 
 # Global flags 
@@ -98,11 +98,12 @@ comment   :
   { print STDERR $item[1], ": ", $item[2], "\n" if $::RD_DEBUG }
 typedef   : 
   keyword_typedef 
-  (   enum { $return = $item[1] } 
-    | class { $return = $item[1] } 
+  (   enum               { $return = $item[1] } 
+    | class              { $return = $item[1] } 
+    | function_pointer   { $return = $item[1] } 
     | /(?>[^;]+)/sio ';' { $return = $item[1] } 
   )  
-  { $return = { type => 'typedef', value => $item[2] } }
+  { $return = { type => 'typedef', body => $item[2] } }
   { print STDERR $item[1], ": ", $item[2], "\n" if $::RD_DEBUG }
 enum      : 
   keyword_enum enum_name enum_body variables ';'
@@ -287,6 +288,8 @@ next_begin_bracket :
   /(?>[^\(]+)/sio     { ( $return = $item[1] ) =~ s/\n/ /go }
 next_end_bracket : 
   /(?>[^\)]+)/sio     { ( $return = $item[1] ) =~ s/\n/ /go }
+next_bracket_or_semicolon : 
+  /(?>[^\(\)\;]+)/sio { ( $return = $item[1] ) =~ s/\n/ /go } 
 next_begin_or_end_bracket : 
   /(?>[^\(\)]+)/sio   { ( $return = $item[1] ) =~ s/\n/ /go } 
 next_bracket_or_brace_or_semicolon : 
@@ -394,10 +397,13 @@ function_header_block :
       { $return = { _subtype => 0 }; } 
     | function_header_next_token 
       { $item[1] =~ m/operator$/o ? 1 : undef } 
-      '(' ')' '(' ')' 
+      '(' ')' 
+      '(' 
+      ( function_parameters { $return = $item[1]; } | { $return = []; } ) 
+      ')' 
       { 
         $return = { _subtype => 2, _name => $item[1].'()', }; 
-        $return->{_value} = []; 
+        $return->{_value} = $item[6]; 
       } 
     | function_header_next_token 
       '(' 
@@ -512,11 +518,13 @@ function_parameter_function_pointer_loop       :
       | { $return = {};       } 
     ) 
     { 
-      $return = { name => $item[1], }; 
       if (exists $item[2]->{name}) { 
           $return->{name}  = $item[2]->{name}; 
           $return->{parameter} = $item[2]->{parameter};
       }
+      else {
+          $return = $item[1];
+      } 
     } 
 
 function_parameter_default_value_next_token : 
@@ -646,3 +654,11 @@ namespace_name :
   next_begin_brace { $return = $item[1] } | { $return = '' } 
 namespace_body : primitive_loop { $return = $item[1] }
 
+#typedef related
+function_pointer : 
+  next_bracket_or_semicolon function_parameter_function_pointer ';'
+  { 
+    $return = $item[2]; 
+    $return->{return} = $item[1]; 
+    $return->{type}   = 'fpointer'; 
+  } 
