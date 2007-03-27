@@ -345,7 +345,8 @@ sub __format_function {
         elsif ($fvalues[$i] eq '::~') {
             # destructor within namespace ;-(
             unshift @fname, pop @fvalues;
-            $i--;
+            unshift @fname, pop @fvalues;
+            $i -= 2;
         }
         else {
             last FN_LOOP;
@@ -365,7 +366,8 @@ sub __format_function {
     }
     if (exists $entry->{property}) {
         foreach my $p (@{$entry->{property}}) {
-            if ($FUNCTION_PROPERTIES->{$p} & KEEP) {
+            if (exists $FUNCTION_PROPERTIES->{$p} and 
+                  $FUNCTION_PROPERTIES->{$p} & KEEP) {
                 unshift @$properties, $p;
             }
         }
@@ -827,6 +829,8 @@ sub __format_namespace {
 =item __format_expression
 
 Format expression.
+
+B<NOTE>: currently expression is stripped. 
 
   # spec 
   
