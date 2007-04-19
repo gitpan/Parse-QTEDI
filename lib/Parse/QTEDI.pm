@@ -1,5 +1,8 @@
 package Parse::QTEDI;
 
+# Author: Dongxu Ma <dongxu@cpan.org>
+# License: Artistic 2007
+
 use 5.005;
 use strict;
 use vars qw($VERSION @ISA @EXPORT @EXPORT_OK $parser $DEBUG);
@@ -11,7 +14,7 @@ require Exporter;
 use Parse::RecDescent ();
 use YAML ();
 
-$VERSION = '0.02';
+$VERSION = '0.03';
 $VERSION = eval $VERSION;  # see L<perlmodstyle>
 
 # Global flags 
@@ -46,6 +49,8 @@ begin          : <rulevar: local $stash = [] >
 begin          : 
   loop(s) eof { print YAML::Dump($stash) } 
 eof            : /^\Z/
+# make sure function_pointer is IN FRONT OF function
+# since function is compatible with function_pointer, unfortunately 
 primitive_loop : 
     qt_macro(s) 
   | kde_macro(s) 
@@ -56,6 +61,7 @@ primitive_loop :
   | extern(s)  
   | namespace(s) 
   | class(s) 
+  | function_pointer(s)
   | function(s) 
   | expression(s) 
 # inside a class each primitive code block has to consider 
@@ -69,7 +75,8 @@ primitive_loop_inside_class :
   | template 
   | extern 
   | namespace 
-  | class 
+  | class   
+  | function_pointer 
   | function 
   | expression 
 loop           : 
@@ -470,7 +477,7 @@ function_parameter_declaration            :
           $return->{subtype} = 'template'; 
       } elsif ($item[2]->{subtype} eq 'fpointer') { 
           $return = $item[2]->{value};
-          $return->{name} = $item[1];
+          $return->{return}  = $item[1];
           $return->{subtype} = 'fpointer'; 
       } 
     } 
