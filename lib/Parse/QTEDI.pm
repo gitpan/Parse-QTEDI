@@ -13,7 +13,7 @@ require Exporter;
 use Parse::RecDescent ();
 use YAML::Syck ();
 
-$VERSION = '0.18';
+$VERSION = '0.19';
 $VERSION = eval $VERSION;  # see L<perlmodstyle>
 
 # Global flags 
@@ -205,7 +205,12 @@ function :
     keyword_template <commit> <reject>
   | class_accessibility <commit> <reject> 
   | function_header function_body
-    { $return = { type => 'function', %{$item[1]} }; } 
+    { 
+      $return = { type => 'function', %{$item[1]} }; 
+      if ($item[2]) {
+        push @{$return->{property}}, $item[2];
+      }
+    } 
     { print STDERR "function: ", $item[1]->{name}, "\n" if $::RD_DEBUG }
 # QT-specific macros
 qt_macro_1 : 
@@ -223,7 +228,9 @@ qt_macro_2 :
   'Q_DECLARE_MUTABLE_SEQUENTIAL_ITERATOR' | 
   'Q_DUMMY_COMPARISON_OPERATOR' 
 qt_macro_3 : 
-  'Q_PRIVATE_SLOT' | 'Q_PROPERTY'
+  'Q_PRIVATE_SLOT' | 'Q_PROPERTY' | 'Q_PRIVATE_PROPERTY' | 'Q_CLASSINFO' | 'Q_INTERFACES'
+qt_macro_10: 
+ 'Q_INVOKABLE' 
 qt_macro_99: 
   'Q_REQUIRED_RESULT' 
 qt_macro : 
@@ -363,16 +370,18 @@ variables : next_semicolon { $return = $item[1] } | { $return = '' }
 function_header       : 
     (   keyword_comment | keyword_class | keyword_enum 
       | keyword_typedef ) <commit> <reject>
-  | function_header_block(s) 
+  | ( qt_macro_10 | ) function_header_block(s) 
     { 
       $return->{name} = ''; 
-      foreach my $i (@{$item[1]}) { 
+      my $seen_function_name = 0; 
+      foreach my $i (@{$item[2]}) { 
           if ($i->{_subtype} == 1) { 
               # attribute
               # stripped currently
               #$return->{name} .= " ". $i->{_value}; 
           } elsif ($i->{_subtype} == 2) { 
               # function name with params
+              $seen_function_name = 1;
               $return->{name} .= $i->{_name};
               $return->{parameter} = $i->{_value} if 
                   @{$i->{_value}};
@@ -380,7 +389,17 @@ function_header       :
               # other macros
               push @{$return->{property}}, $i->{_value} if 
                   $i->{_value};
-          } 
+          } elsif ($i->{_subtype} == 4) {
+              # const
+              if ($i->{_value}) {
+                  if ($seen_function_name) {
+                      push @{$return->{property}}, $i->{_value};
+                  }
+                  else {
+                      $return->{name} = $i->{_value}. ' '. $return->{name};
+                  }
+              }
+          }
       } 
     } 
 function_header_next_token : 
@@ -394,7 +413,25 @@ function_header_block :
   (   /const\b/o
       { 
         #print STDERR "const\n";
-        $return = { _subtype => 3, _value => 'const' };
+        $return = { _subtype => 4, _value => 'const' };
+      }
+    | function_header_next_token 
+      { $item[1] =~ m/\boperator\b/o ? 1 : undef } 
+      ( '(' ')' { $return = '()' } | next_begin_bracket { $return = $item[1] } )
+      '(' 
+      ( function_parameters { $return = $item[1]; } | { $return = []; } ) 
+      ')' 
+      { 
+        #print STDERR "operator\n";
+        $return = { _subtype => 2, _name => $item[1].$item[3], }; 
+        $return->{_value} = $item[5];
+      } 
+    | function_header_next_token 
+      { $item[1] =~ m/^\s*throw\s*$/o ? 1 : undef } 
+      '(' next_bracket_or_brace_or_semicolon ')'
+      { 
+        #print STDERR "throw\n";
+        $return = { _subtype => 3, _value => 'throw('. $item[4]. ')' }
       }
     | function_header_next_token 
       { $item[1] =~ m/\_\_attribute\_\_\s*$/o ? 1 : undef } 
@@ -409,24 +446,6 @@ function_header_block :
       { $item[1] =~ m/^\:/o ? 1 : undef } 
       function_header_loop(s) 
       { $return = { _subtype => 0 } } 
-    | function_header_next_token 
-      { $item[1] =~ m/\boperator\b/o ? 1 : undef } 
-      ( '(' ')' { $return = '()' } | next_begin_bracket { $return = $item[1] } )
-      '(' 
-      ( function_parameters { $return = $item[1]; } | { $return = []; } ) 
-      ')' 
-      { 
-        #print STDERR "operator\n";
-        $return = { _subtype => 2, _name => $item[1].$item[3], }; 
-        $return->{_value} = $item[5];
-      } 
-    | function_header_next_token 
-      { $item[1] =~ m/^\s*throw\s+$/o ? 1 : undef } 
-      '(' next_bracket_or_brace_or_semicolon ')'
-      { 
-        #print STDERR "throw\n";
-        $return = { _subtype => 3, _value => 'throw('. $item[4]. ')' }
-      }
     | function_header_next_token 
       '(' 
       ( function_parameters { $return = $item[1]; } | { $return = []; } ) 
@@ -589,6 +608,10 @@ function_parameter_default_value            :
 function_parameter_default_value_loop_token_dispatch : 
     '(' ')' 
     { $return = '()'; } 
+  | '" "' { $return = $item[1]; }
+  | "' '" { $return = $item[1]; }
+  | "(' ')" { $return = $item[1]; }
+  | '(" ")' { $return = $item[1]; }
   | '(' function_parameter_default_value_loop2 ')' 
     { $return = join("", @item[1 .. 3]); } 
   | "'" /(?>[^\']*)/iso "'" { $return = join("", @item[1 .. 3]); } 
@@ -620,7 +643,7 @@ function_parameter_default_value_loop       :
 
 function_body         : 
     ';' { $return = '' } 
-  | '=' '0' ';' { $return = '' }
+  | '=' '0' ';' { $return = 'pure virtual' }
   | '{' balanced_brace(s) '}' ( ';' | ) { $return = '' }
 balanced_brace_next_token : 
     next_begin_or_end_brace { $return = $item[1] }
@@ -681,27 +704,29 @@ class_body          :
     { $return = $item[2] } 
   | { $return = ''       } 
 class_body_content  : 
-    class_accessibility 
-    { $return = $item[1] } 
-  | primitive_loop_inside_class
-    { $return = $item[1] } 
+    class_accessibility { $return = $item[1] } 
+  | noop(s) { $return = { type => 'noop' } } 
+  | primitive_loop_inside_class { $return = $item[1] } 
     #{ print STDERR "class_body_content: ", $return, "\n" if $::RD_DEBUG }
 #  | { $return = ''       } 
 #    #{ print STDERR "class_body_content: NULL\n" if $::RD_DEBUG } 
 class_accessibility_loop : 
-  class_accessibility_content | qt_accessibility_content | 
-  kde_accessibility_content 
+    ( class_accessibility_content { $return = $item[1] } | { $return = '' } ) qt_accessibility_content { $return = $item[1] ? join(' ', $item[1], $item[2]) : $item[2] }
+  | class_accessibility_content
+  | kde_accessibility_content 
 class_accessibility : 
-  class_accessibility_loop(s) ':' 
+  class_accessibility_loop ':' 
   { $return = { type => 'accessibility', value => $item[1] } } 
 qt_accessibility_content : 
-  'Q_SIGNALS' | 'Q_SLOTS' | 'signals' | 'slots' 
+  'Q_SIGNALS' | 'Q_SLOTS' | 'signals' | 'slots'
 kde_accessibility_content: 
   'k_dcop' 
 class_accessibility_content : 
   'public' | 'private' | 'protected' 
 class_attribute: 
   /__attribute__\s*\(\((.+?)\)\)/io { $return = $1 } | { $return = '' }
+noop :
+  ';'
 
 #namespace related
 namespace_name : 
